@@ -24,6 +24,9 @@ class NotificationMessageRequest<T> {
     private NotificationSpecificFields dataFields;
 }
 
+
+
+
 @Data
 @Builder
 @AllArgsConstructor

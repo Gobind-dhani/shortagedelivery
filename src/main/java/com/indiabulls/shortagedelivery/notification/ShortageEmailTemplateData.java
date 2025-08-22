@@ -9,14 +9,14 @@ import lombok.*;
 @Builder
 public class ShortageEmailTemplateData {
     @JsonProperty("CLIENT")
-    private String clientId;
+    private String CLIENT;
 
     @JsonProperty("ISIN")
-    private String isin;
+    private String ISIN;
 
     @JsonProperty("QTY")
-    private Integer shortageQty;
+    private Integer QTY;
 
     @JsonProperty("PRICE")
-    private Double averagePrice;
+    private Double PRICE;
 }

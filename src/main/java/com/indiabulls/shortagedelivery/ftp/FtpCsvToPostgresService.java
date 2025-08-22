@@ -147,7 +147,7 @@ public class FtpCsvToPostgresService {
                 try { ftpClient.disconnect(); } catch (Exception ignored) {}
             }
 
-            return "✅ Loaded Auction CSV and updated total_quantity in " + targetTable + " from " + todayBasePath;
+            return "Loaded Auction CSV and updated total_quantity in " + targetTable + " from " + todayBasePath;
 
         } catch (Exception e) {
             e.printStackTrace();
