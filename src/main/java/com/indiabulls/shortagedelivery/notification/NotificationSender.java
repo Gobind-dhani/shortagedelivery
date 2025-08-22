@@ -1,5 +1,7 @@
 package com.indiabulls.shortagedelivery.notification;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -64,7 +66,11 @@ class RabbitMqTransportService implements NotificationTransportService {
     @Value("${rabbitmq.exchangeType}")
     private String exchangeType;
 
-    public RabbitMqTransportService() {}
+    private final ObjectMapper objectMapper;
+
+    public RabbitMqTransportService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     @PostConstruct
     public void init() {
@@ -90,8 +96,11 @@ class RabbitMqTransportService implements NotificationTransportService {
     @Override
     public boolean send(String routeName, NotificationMessageRequest<?> notificationMessageRequest) {
         try {
-            String message = notificationMessageRequest.toString();
-            channel.basicPublish(exchange, routeName, null, message.getBytes(StandardCharsets.UTF_8));
+            String message = objectMapper.writeValueAsString(notificationMessageRequest);
+            AMQP.BasicProperties props = new AMQP.BasicProperties.Builder()
+                    .contentType("application/json")
+                    .build();
+            channel.basicPublish(exchange, routeName, props, message.getBytes(StandardCharsets.UTF_8));
             System.out.println("Sent to RabbitMQ exchange=" + exchange + " route=" + routeName + " message=" + message);
             return true;
         } catch (Exception e) {
