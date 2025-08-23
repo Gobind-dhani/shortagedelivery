@@ -36,6 +36,7 @@ class NotificationMessageRequest<T> {
 class NotificationSpecificFields {
     private String emailDisplayName;
     private List<Object> attachments;
+    private String eventType;
 }
 
 interface NotificationTransportService {

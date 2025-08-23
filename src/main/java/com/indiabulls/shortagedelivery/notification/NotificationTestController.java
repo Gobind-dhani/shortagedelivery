@@ -17,12 +17,7 @@ public class NotificationTestController {
         return "Email notification sent";
     }
 
-    @PostMapping("/sms")
-    public String sendSmsNotification(
-            @RequestBody NotificationMessageRequest<ShortageSMSTemplateData> request) {
-        shortageNotificationService.sendSmsNotification(request);
-        return "SMS notification sent";
-    }
+
 }
 
 
