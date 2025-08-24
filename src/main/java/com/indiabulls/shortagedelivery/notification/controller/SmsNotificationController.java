@@ -1,5 +1,6 @@
-package com.indiabulls.shortagedelivery.notification;
+package com.indiabulls.shortagedelivery.notification.controller;
 
+import com.indiabulls.shortagedelivery.notification.service.SmsNotificationService;
 import com.indiabulls.shortagedelivery.notification.dto.SmsNotificationRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

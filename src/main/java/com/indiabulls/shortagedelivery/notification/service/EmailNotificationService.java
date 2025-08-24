@@ -1,5 +1,9 @@
-package com.indiabulls.shortagedelivery.notification;
+package com.indiabulls.shortagedelivery.notification.service;
 
+import com.indiabulls.shortagedelivery.notification.helper.NotificationMessageRequest;
+import com.indiabulls.shortagedelivery.notification.helper.NotificationSender;
+import com.indiabulls.shortagedelivery.notification.dto.ShortageEmailTemplateData;
+import com.indiabulls.shortagedelivery.notification.dto.ShortageSMSTemplateData;
 import lombok.RequiredArgsConstructor;
 import lombok.var;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,11 +14,10 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Collections;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
-public class ShortageNotificationService {
+public class EmailNotificationService {
 
     private final NotificationSender notificationSender;
 
@@ -65,21 +68,6 @@ public class ShortageNotificationService {
         System.out.println("Email notification sent to " + req.getTemplateDataJson().getCLIENT());
     }
 
-    // --- New method to accept JSON payload for SMS ---
-    public void sendSmsNotification(NotificationMessageRequest<ShortageSMSTemplateData> request) {
-        var req = NotificationMessageRequest.<ShortageSMSTemplateData>builder()
-                .receivers(request.getReceivers())
-                .sender(smsSender)                // override with configured sender
-                .subject(null)
-                .templateName(smsTemplate)        // override with configured template
-                .templateDataJson(request.getTemplateDataJson())
-                .dataFields(request.getDataFields())
-                .build();
-
-        notificationSender.sendSms(req.getReceivers(), req.getTemplateDataJson());
-
-        System.out.println("SMS notification sent to " + req.getTemplateDataJson().getClientId());
-    }
 
     // --- Existing DB-driven notification flow stays same ---
     public void notifyClientsWithShortage() {

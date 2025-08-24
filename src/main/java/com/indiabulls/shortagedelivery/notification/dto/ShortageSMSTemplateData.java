@@ -1,4 +1,4 @@
-package com.indiabulls.shortagedelivery.notification;
+package com.indiabulls.shortagedelivery.notification.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
