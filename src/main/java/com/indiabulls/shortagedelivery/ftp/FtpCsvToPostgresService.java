@@ -8,10 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.Types;
+import java.sql.*;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -29,56 +26,56 @@ public class FtpCsvToPostgresService {
     @Value("${spring.datasource.username}") private String jdbcUser;
     @Value("${spring.datasource.password}") private String jdbcPass;
 
-    @Value("${target.table}") private String targetTable;
-
-    public String loadEquityFile() {
+    /**
+     * Fetch the SHRT file from FTP, parse CSV, and dump shortage data into Postgres.
+     */
+    public String loadShortFile() {
         FTPClient ftpClient = new FTPClient();
 
         try {
-            //  Build today's dynamic path
+            // Build today's path
             LocalDate today = LocalDate.now();
             String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
-            // e.g. 21-August-2025
-
             String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
 
-            // 1) Connect to FTP
+            // Connect FTP
             ftpClient.connect(ftpServer);
             ftpClient.login(ftpUser, ftpPass);
             ftpClient.enterLocalPassiveMode();
             ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
 
-            // 2) Find auction file
-            String auctionFilePath = null;
+            // Locate SHRT file
+            String shrtFilePath = null;
             for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
                 String name = file.getName();
-                if (name.contains("Equity") && (name.endsWith(".csv.gz") || name.endsWith(".csv"))) {
-                    auctionFilePath = todayBasePath + "/" + name;
+                if (name.matches("NCL_C_08756_SHRT_.*\\.csv\\.gz")) {
+                    shrtFilePath = todayBasePath + "/" + name;
+                    System.out.println("Found SHRT file: " + shrtFilePath);
                     break;
                 }
             }
-            if (auctionFilePath == null) {
-                return " Auction file not found in FTP folder " + todayBasePath;
+            if (shrtFilePath == null) {
+                return " SHRT file not found in " + todayBasePath;
             }
 
-            // 3) Download file into memory
+            // Download into memory
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            boolean ok = ftpClient.retrieveFile(auctionFilePath, baos);
+            boolean ok = ftpClient.retrieveFile(shrtFilePath, baos);
             if (!ok) {
-                return " Failed to download: " + auctionFilePath;
+                return " Failed to download: " + shrtFilePath;
             }
 
-            // 4) Prepare reader (unzip if needed)
+            // Prepare CSV reader (gzip → utf-8 text)
             InputStream rawIn = new ByteArrayInputStream(baos.toByteArray());
-            InputStream csvIn = auctionFilePath.endsWith(".gz") ? new GZIPInputStream(rawIn) : rawIn;
+            InputStream csvIn = new GZIPInputStream(rawIn);
 
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(csvIn, StandardCharsets.UTF_8));
                  Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass)) {
 
-                // 5) Read header line
+                // Read header
                 String headerLine = reader.readLine();
                 if (headerLine == null) {
-                    return " Empty CSV file";
+                    return " Empty SHRT file";
                 }
 
                 String[] headers = headerLine.split(",", -1);
@@ -87,42 +84,39 @@ public class FtpCsvToPostgresService {
                     headerMap.put(headers[i].trim().toLowerCase(), i);
                 }
 
-                if (!headerMap.containsKey("isin") ||
-                        !headerMap.containsKey("clntid") ||
-                        !headerMap.containsKey("qtyorshrtqty")) {
+                if (!headerMap.containsKey("security symbol") ||
+                        !headerMap.containsKey("short quantity") ||
+                        !headerMap.containsKey("settlement no")) {
                     return " Required headers missing. Found: " + headerMap.keySet();
                 }
 
-                // 6) Insert into DB
-                String insertQuery = "INSERT INTO focus.shortage_delivery " +
-                        "(isin, client_id, short_quantity, created_date, updated_date) " +
-                        "VALUES (?, ?, ?, now(), now())";
+                // Prepare UPSERT statement
+                String insertSql = "INSERT INTO focus.short_delivery " +
+                        "(security_symbol, short_quantity, settlement_no, created_date, updated_date) " +
+                        "VALUES (?, ?, ?, now(), now()) ";
 
-                try (PreparedStatement ps = conn.prepareStatement(insertQuery)) {
+                try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
                     conn.setAutoCommit(false);
 
-                    int batch = 0;
-                    final int BATCH_SIZE = 1000;
-
                     String line;
+                    int batch = 0;
+                    final int BATCH_SIZE = 500;
+
                     while ((line = reader.readLine()) != null) {
                         if (line.trim().isEmpty()) continue;
 
                         String[] cols = line.split(",", -1);
 
-                        String isin = getColumn(cols, headerMap, "isin");
-                        String clientId = getColumn(cols, headerMap, "clntid");
-                        String qtyStr = getColumn(cols, headerMap, "qtyorshrtqty");
+                        String securitySymbol = getColumn(cols, headerMap, "security symbol");
+                        String shortQtyStr = getColumn(cols, headerMap, "short quantity");
+                        String settlementStr = getColumn(cols, headerMap, "settlement no");
 
-                        Integer shortQty = parseInt(qtyStr);
+                        Integer shortQty = parseInt(shortQtyStr);
+                        Integer settlementNo = parseInt(settlementStr);
 
-                        setNullableString(ps, 1, isin);
-                        setNullableString(ps, 2, clientId);
-                        if (shortQty != null) {
-                            ps.setInt(3, shortQty);
-                        } else {
-                            ps.setNull(3, Types.INTEGER);
-                        }
+                        ps.setString(1, securitySymbol);
+                        if (shortQty != null) ps.setInt(2, shortQty); else ps.setNull(2, Types.INTEGER);
+                        if (settlementNo != null) ps.setInt(3, settlementNo); else ps.setNull(3, Types.INTEGER);
 
                         ps.addBatch();
                         batch++;
@@ -136,56 +130,31 @@ public class FtpCsvToPostgresService {
                     ps.executeBatch();
                     conn.commit();
                 }
-
-                // 7) Update total_quantity from trxn_table_class
-                updateTotalQuantityFromTrxn(conn);
             }
 
-            // 8) Cleanup FTP
-            if (ftpClient.isConnected()) {
-                try { ftpClient.logout(); } catch (Exception ignored) {}
-                try { ftpClient.disconnect(); } catch (Exception ignored) {}
-            }
+            // Disconnect FTP
+            ftpClient.logout();
+            ftpClient.disconnect();
 
-            return "Loaded Auction CSV and updated total_quantity in " + targetTable + " from " + todayBasePath;
+            return " Loaded SHRT file into focus.short_delivery";
 
         } catch (Exception e) {
             e.printStackTrace();
-            if (ftpClient.isConnected()) {
-                try { ftpClient.logout(); } catch (Exception ignored) {}
-                try { ftpClient.disconnect(); } catch (Exception ignored) {}
-            }
-            return "❌ Error: " + e.getMessage();
+            try {
+                if (ftpClient.isConnected()) {
+                    ftpClient.logout();
+                    ftpClient.disconnect();
+                }
+            } catch (Exception ignored) {}
+            return " Error: " + e.getMessage();
         }
     }
 
-    private void updateTotalQuantityFromTrxn(Connection conn) throws Exception {
-        String sql = "UPDATE focus.shortage_delivery sd " +
-                "SET total_quantity = t.trn_qty, " +
-                "    updated_date = now() " +
-                "FROM focus.trxn_table_class t " +
-                "WHERE sd.isin = t.isin " +
-                "  AND sd.client_id = SUBSTRING(t.party_cd, 2)"; // drop leading 'C'
-
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            int rows = ps.executeUpdate();
-            conn.commit();
-            System.out.println("Updated total_quantity for " + rows + " rows in shortage_delivery");
-        }
-    }
-
+    // helpers
     private static String getColumn(String[] cols, Map<String, Integer> headerMap, String key) {
         Integer idx = headerMap.get(key);
         if (idx == null || idx >= cols.length) return null;
         return cols[idx].trim();
-    }
-
-    private static void setNullableString(PreparedStatement ps, int index, String value) throws Exception {
-        if (value == null || value.trim().isEmpty()) {
-            ps.setNull(index, Types.VARCHAR);
-        } else {
-            ps.setString(index, value.trim());
-        }
     }
 
     private static Integer parseInt(String val) {

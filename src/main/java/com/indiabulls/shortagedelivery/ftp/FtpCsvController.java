@@ -10,8 +10,8 @@ public class FtpCsvController {
     @Autowired
     private FtpCsvToPostgresService ftpCsvToPostgresService;
 
-    @GetMapping("/loadT1")
+    @GetMapping("/fetch")
     public String loadEquityT1File() {
-        return ftpCsvToPostgresService.loadEquityFile();
+        return ftpCsvToPostgresService.loadShortFile();
     }
 }
