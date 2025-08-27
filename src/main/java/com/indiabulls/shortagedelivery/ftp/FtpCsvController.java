@@ -11,7 +11,11 @@ public class FtpCsvController {
     private FtpCsvToPostgresService ftpCsvToPostgresService;
 
     @GetMapping("/fetch")
-    public String loadEquityT1File() {
+    public String loadShortFile() {
         return ftpCsvToPostgresService.loadShortFile();
+    }
+    @GetMapping("/equity")
+    public String loadEquityT1File() {
+        return ftpCsvToPostgresService.loadDeliveryDpoFile();
     }
 }

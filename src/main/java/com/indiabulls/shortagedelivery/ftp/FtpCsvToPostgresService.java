@@ -34,7 +34,7 @@ public class FtpCsvToPostgresService {
 
         try {
             // Build today's path
-            LocalDate today = LocalDate.now();
+            LocalDate today = LocalDate.now().minusDays(1);
             String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
             String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
 
@@ -168,4 +168,284 @@ public class FtpCsvToPostgresService {
             return null;
         }
     }
+    /**
+     * Fetch the DeliveryDPO file from FTP, parse it, and update Postgres with qty_received_t1, isin, clnt_id.
+     */
+
+    /**
+     * Fetch the DeliveryDPO file from FTP, parse it, and update Postgres with qty_received_t1, isin, clnt_id.
+     */
+    public String loadDeliveryDpoFile() {
+        FTPClient ftpClient = new FTPClient();
+
+        try {
+            // Build today's path
+            LocalDate today = LocalDate.now().minusDays(1);
+            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+            String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
+
+            // Connect FTP
+            ftpClient.connect(ftpServer);
+            ftpClient.login(ftpUser, ftpPass);
+            ftpClient.enterLocalPassiveMode();
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+
+            // Locate DeliveryDPO file
+            String dpoFilePath = null;
+            for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
+                String name = file.getName();
+                if (name.matches("DeliveryDpo_NCL_CM_EquityT1_CM_08756_.*\\.csv\\.gz")) {
+                    dpoFilePath = todayBasePath + "/" + name;
+                    System.out.println("Found DeliveryDPO file: " + dpoFilePath);
+                    break;
+                }
+            }
+            if (dpoFilePath == null) {
+                return " DeliveryDPO file not found in " + todayBasePath;
+            }
+
+            // Download into memory
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            boolean ok = ftpClient.retrieveFile(dpoFilePath, baos);
+            if (!ok) {
+                return " Failed to download: " + dpoFilePath;
+            }
+
+            // Prepare CSV reader (gzip → utf-8 text)
+            InputStream rawIn = new ByteArrayInputStream(baos.toByteArray());
+            InputStream csvIn = new GZIPInputStream(rawIn);
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(csvIn, StandardCharsets.UTF_8));
+                 Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass)) {
+
+                // Read header
+                String headerLine = reader.readLine();
+                if (headerLine == null) {
+                    return " Empty DeliveryDPO file";
+                }
+
+                String[] headers = headerLine.split(",", -1);
+                Map<String, Integer> headerMap = new HashMap<>();
+                for (int i = 0; i < headers.length; i++) {
+                    headerMap.put(headers[i].trim().toLowerCase(), i);
+                }
+
+                if (!headerMap.containsKey("tckrsymb") ||
+                        !headerMap.containsKey("sctiessttlmtxid") ||
+                        !headerMap.containsKey("qtyorshrtqty") ||
+                        !headerMap.containsKey("isin") ||
+                        !headerMap.containsKey("clntid")) {
+                    return " Required headers missing in DeliveryDPO. Found: " + headerMap.keySet();
+                }
+
+
+                // Prepare UPDATE statement
+                String updateSql = "UPDATE focus.short_delivery " +
+                        "SET qty_received_t1 = ?, isin = ?, clnt_id = ?, updated_date = now() " +
+                        "WHERE security_symbol = ? AND settlement_no = ?";
+
+                try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
+                    conn.setAutoCommit(false);
+
+                    String line;
+                    int batch = 0;
+                    final int BATCH_SIZE = 500;
+
+                    while ((line = reader.readLine()) != null) {
+                        if (line.trim().isEmpty()) continue;
+
+                        String[] cols = line.split(",", -1);
+
+                        String securitySymbol = getColumn(cols, headerMap, "tckrsymb");
+                        String settlementStr = getColumn(cols, headerMap, "sctiessttlmtxid");
+                        String qtyStr = getColumn(cols, headerMap, "qtyorshrtqty");
+                        String isin = getColumn(cols, headerMap, "isin");
+                        String clntId = getColumn(cols, headerMap, "clntid");
+
+//                        Integer settlementNo = parseInt(settlementStr);
+                        Integer qty = parseInt(qtyStr);
+
+                        if (securitySymbol == null || settlementStr == null) {
+                            continue; // skip invalid row
+                        }
+
+                         ps.setInt(1, qty);
+                        ps.setString(2, isin);
+                        ps.setString(3, clntId);
+                        ps.setString(4, securitySymbol);
+                        ps.setString(5, settlementStr);
+
+                        ps.addBatch();
+                        batch++;
+
+                        if (batch % BATCH_SIZE == 0) {
+                            ps.executeBatch();
+                            conn.commit();
+                        }
+                    }
+
+                    ps.executeBatch();
+                    conn.commit();
+                }
+            }
+
+            // Disconnect FTP
+            ftpClient.logout();
+            ftpClient.disconnect();
+
+            return " Updated focus.short_delivery with DeliveryDPO data";
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                if (ftpClient.isConnected()) {
+                    ftpClient.logout();
+                    ftpClient.disconnect();
+                }
+            } catch (Exception ignored) {}
+            return " Error: " + e.getMessage();
+        }
+    }
+
+
+
+
+
+
+//    public String loadDeliveryDpoFile() {
+//        FTPClient ftpClient = new FTPClient();
+//
+//        try {
+//            // Build today's path
+//            LocalDate today = LocalDate.now().minusDays(1);            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+//            String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
+//
+//            // Connect FTP
+//            ftpClient.connect(ftpServer);
+//            ftpClient.login(ftpUser, ftpPass);
+//            ftpClient.enterLocalPassiveMode();
+//            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+//
+//            // Locate DeliveryDPO file
+//            String dpoFilePath = null;
+//            for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
+//                String name = file.getName();
+//                if (name.matches("DeliveryDpo_NCL_CM_EquityT1_CM_08756_.*\\.csv\\.gz")) {
+//                    dpoFilePath = todayBasePath + "/" + name;
+//                    System.out.println("Found DeliveryDPO file: " + dpoFilePath);
+//                    break;
+//                }
+//            }
+//            if (dpoFilePath == null) {
+//                return "DeliveryDPO file not found in " + todayBasePath;
+//            }
+//
+//            // Download into memory
+//            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+//            boolean ok = ftpClient.retrieveFile(dpoFilePath, baos);
+//            if (!ok) {
+//                return "Failed to download: " + dpoFilePath;
+//            }
+//
+//            // Prepare CSV reader (gzip → utf-8 text)
+//            InputStream rawIn = new ByteArrayInputStream(baos.toByteArray());
+//            InputStream csvIn = new GZIPInputStream(rawIn);
+//
+//            try (BufferedReader reader = new BufferedReader(new InputStreamReader(csvIn, StandardCharsets.UTF_8));
+//                 Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass)) {
+//
+//                conn.setAutoCommit(false);
+//                String insertSql = "INSERT INTO focus.short_delivery " +
+//                        "(settlement_no, clnt_id, qty_received_t1, security_symbol, isin) " +
+//                        "VALUES (?, ?, ?, ?, ?)";
+//
+//                try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+//                    String headerLine = reader.readLine();
+//                    if (headerLine == null) {
+//                        return "Empty DeliveryDPO file!";
+//                    }
+//
+//                    String[] headers = headerLine.split(",", -1);
+//                    Map<String, Integer> headerMap = new HashMap<>();
+//                    for (int i = 0; i < headers.length; i++) {
+//                        headerMap.put(headers[i].trim(), i);
+//                    }
+//
+//                    // Ensure required headers exist
+//                    if (!headerMap.containsKey("SctiesSttlmTxId") ||
+//                            !headerMap.containsKey("ClntId") ||
+//                            !headerMap.containsKey("QtyORShrtQty") ||
+//                            !headerMap.containsKey("TckrSymb") ||
+//                            !headerMap.containsKey("ISIN")) {
+//                        return "Missing required headers in DeliveryDPO file!";
+//                    }
+//
+//                    String line;
+//                    while ((line = reader.readLine()) != null) {
+//                        String[] cols = line.split(",", -1);
+//
+//                        String settlementNo = cols[headerMap.get("SctiesSttlmTxId")].trim();
+//                        String clntId = cols[headerMap.get("ClntId")].trim();
+//                        int qty = Integer.parseInt(cols[headerMap.get("QtyORShrtQty")].trim());
+//                        String tckrSymb = cols[headerMap.get("TckrSymb")].trim();
+//                        String isin = cols[headerMap.get("ISIN")].trim();
+//
+//                        // Convert settlementNo to long for BIGINT
+//
+//
+//
+//                        ps.setString(1, settlementNo);   // BIGINT
+//                        ps.setString(2, clntId);       // TEXT
+//                        ps.setInt(3, qty);             // INTEGER
+//                        ps.setString(4, tckrSymb);     // TEXT
+//                        ps.setString(5, isin);         // TEXT
+//
+//                        ps.addBatch();
+//                    }
+//                    ps.executeBatch();
+//
+//                    // Update total_quantity from trxn_table_class
+//                    updateShortDeliveryWithTotalQty(conn);
+//
+//                    conn.commit();
+//                }
+//            }
+//
+//            // Disconnect FTP
+//            ftpClient.logout();
+//            ftpClient.disconnect();
+//
+//            return "Updated focus.short_delivery with DeliveryDPO data";
+//
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//            try {
+//                if (ftpClient.isConnected()) {
+//                    ftpClient.logout();
+//                    ftpClient.disconnect();
+//                }
+//            } catch (Exception ignored) {}
+//            return "Error: " + e.getMessage();
+//        }
+//    }
+//
+//    private void updateShortDeliveryWithTotalQty(Connection conn) throws SQLException {
+//        String updateSql =
+//                "UPDATE focus.short_delivery sd " +
+//                        "SET total_quantity = sub.total_trn_qty " +
+//                        "FROM (" +
+//                        "    SELECT settlement_no, isin, SUBSTRING(party_cd FROM 2) AS clnt_id, SUM(trn_qty) AS total_trn_qty " +
+//                        "    FROM focus.trxn_table_class " +
+//                        "    GROUP BY settlement_no, isin, SUBSTRING(party_cd FROM 2)" +
+//                        ") sub " +
+//                        "WHERE sd.settlement_no = sub.settlement_no " +
+//                        "AND sd.isin = sub.isin " +
+//                        "AND sd.clnt_id = sub.clnt_id";
+//
+//        try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
+//            int updated = ps.executeUpdate();
+//            System.out.println("Updated total_quantity for " + updated + " rows in short_delivery");
+//        }
+//    }
+
 }
