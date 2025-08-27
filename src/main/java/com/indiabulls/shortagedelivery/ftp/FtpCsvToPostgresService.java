@@ -181,4 +181,118 @@ public class FtpCsvToPostgresService {
         }
     }
 
+    public String loadShrtFileAndCompare() {
+        FTPClient ftpClient = new FTPClient();
+
+        try {
+            // Build yesterday’s folder path
+            LocalDate today = LocalDate.now().minusDays(1);
+            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+            String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
+
+            // Connect FTP
+            ftpClient.connect(ftpServer);
+            ftpClient.login(ftpUser, ftpPass);
+            ftpClient.enterLocalPassiveMode();
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+
+            // Locate SHRT file (pattern may differ, adjust regex if needed)
+            String shrtFilePath = null;
+            for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
+                String name = file.getName();
+                if (name.matches("NCL_C_08756_SHRT_.*\\.csv\\.gz")) {
+                    shrtFilePath = todayBasePath + "/" + name;
+                    System.out.println("Found SHRT file: " + shrtFilePath);
+                    break;
+                }
+            }
+            if (shrtFilePath == null) {
+                return "SHRT file not found in " + todayBasePath;
+            }
+
+            // Download file into memory
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            boolean ok = ftpClient.retrieveFile(shrtFilePath, baos);
+            if (!ok) {
+                return "Failed to download: " + shrtFilePath;
+            }
+
+            // Prepare reader (gzip → utf-8 text)
+            InputStream rawIn = new ByteArrayInputStream(baos.toByteArray());
+            InputStream csvIn = new GZIPInputStream(rawIn);
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(csvIn, StandardCharsets.UTF_8));
+                 Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass)) {
+
+                String headerLine = reader.readLine();
+                if (headerLine == null) {
+                    return "Empty SHRT file!";
+                }
+
+                String[] headers = headerLine.split(",", -1);
+                Map<String, Integer> headerMap = new HashMap<>();
+                for (int i = 0; i < headers.length; i++) {
+                    headerMap.put(headers[i].trim(), i);
+                }
+
+                // Expected headers: adjust according to SHRT file structure
+                if (!headerMap.containsKey("Security Symbol")) {
+                    return "Missing required header 'Symbol' in SHRT file!";
+                }
+
+                // Query (no client id, so we only match on symbol)
+                String checkSql = "SELECT clnt_id, qty_received_t1, total_quantity " +
+                        "FROM focus.short_delivery " +
+                        "WHERE security_symbol = ?";
+
+                List<String> mismatches = new ArrayList<>();
+
+                try (PreparedStatement ps = conn.prepareStatement(checkSql)) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String[] cols = line.split(",", -1);
+
+                        String symbol = cols[headerMap.get("Security Symbol")].trim();
+
+                        ps.setString(1, symbol);
+
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) {
+                                String clntId = rs.getString("clnt_id");
+                                int qtyReceived = rs.getInt("qty_received_t1");
+                                int totalQty = rs.getInt("total_quantity");
+
+                                if (qtyReceived != totalQty) {
+                                    mismatches.add("Client=" + clntId +
+                                            ", Symbol=" + symbol +
+                                            ", total_quantity=" + totalQty +
+                                            ", qty_received_t1=" + qtyReceived);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (mismatches.isEmpty()) {
+                    return "No mismatches found between SHRT and short_delivery";
+                } else {
+                    mismatches.forEach(System.out::println);
+                    return "Found " + mismatches.size() + " mismatches. Check logs for details.";
+                }
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Error: " + e.getMessage();
+        } finally {
+            try {
+                if (ftpClient.isConnected()) {
+                    ftpClient.logout();
+                    ftpClient.disconnect();
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
+
 }

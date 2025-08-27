@@ -10,10 +10,10 @@ public class FtpCsvController {
     @Autowired
     private FtpCsvToPostgresService ftpCsvToPostgresService;
 
-//    @GetMapping("/fetch")
-//    public String loadShortFile() {
-//        return ftpCsvToPostgresService.loadShortFile();
-//    }
+    @GetMapping("/fetch")
+    public String loadShortFile() {
+        return ftpCsvToPostgresService.loadShrtFileAndCompare();
+    }
     @GetMapping("/equity")
     public String loadEquityT1File() {
         return ftpCsvToPostgresService.loadDeliveryDpoFile();
