@@ -4,6 +4,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.Map;
+
 @RestController
 public class FtpCsvController {
 
@@ -14,8 +17,14 @@ public class FtpCsvController {
     public String loadShortFile() {
         return ftpCsvToPostgresService.loadShrtFileAndCompare();
     }
+
     @GetMapping("/equity")
     public String loadEquityT1File() {
         return ftpCsvToPostgresService.loadDeliveryDpoFile();
+    }
+
+    @GetMapping("/shortage-contacts")
+    public List<Map<String, Object>> getShortageContacts() {
+        return ftpCsvToPostgresService.findClientsWithShortageContacts();
     }
 }

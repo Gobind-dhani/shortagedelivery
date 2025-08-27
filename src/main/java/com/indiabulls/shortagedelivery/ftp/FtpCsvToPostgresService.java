@@ -196,11 +196,11 @@ public class FtpCsvToPostgresService {
             ftpClient.enterLocalPassiveMode();
             ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
 
-            // Locate SHRT file (pattern may differ, adjust regex if needed)
+            // Locate SHRT file
             String shrtFilePath = null;
             for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
                 String name = file.getName();
-                if (name.matches("NCL_C_08756_SHRT_.*\\.csv\\.gz")) {
+                if (name.matches("NCL_C_.*\\.csv\\.gz")) {
                     shrtFilePath = todayBasePath + "/" + name;
                     System.out.println("Found SHRT file: " + shrtFilePath);
                     break;
@@ -235,7 +235,6 @@ public class FtpCsvToPostgresService {
                     headerMap.put(headers[i].trim(), i);
                 }
 
-                // Expected headers: adjust according to SHRT file structure
                 if (!headerMap.containsKey("Security Symbol")) {
                     return "Missing required header 'Symbol' in SHRT file!";
                 }
@@ -245,15 +244,21 @@ public class FtpCsvToPostgresService {
                         "FROM focus.short_delivery " +
                         "WHERE security_symbol = ?";
 
+                // Update short_quantity where mismatch found
+                String updateSql = "UPDATE focus.short_delivery " +
+                        "SET short_quantity = ? " +
+                        "WHERE clnt_id = ? AND security_symbol = ?";
+
                 List<String> mismatches = new ArrayList<>();
 
-                try (PreparedStatement ps = conn.prepareStatement(checkSql)) {
+                try (PreparedStatement ps = conn.prepareStatement(checkSql);
+                     PreparedStatement updatePs = conn.prepareStatement(updateSql)) {
+
                     String line;
                     while ((line = reader.readLine()) != null) {
                         String[] cols = line.split(",", -1);
 
                         String symbol = cols[headerMap.get("Security Symbol")].trim();
-
                         ps.setString(1, symbol);
 
                         try (ResultSet rs = ps.executeQuery()) {
@@ -263,10 +268,19 @@ public class FtpCsvToPostgresService {
                                 int totalQty = rs.getInt("total_quantity");
 
                                 if (qtyReceived != totalQty) {
+                                    int diff = totalQty - qtyReceived;
+
+                                    // Update short_quantity
+                                    updatePs.setInt(1, diff);
+                                    updatePs.setString(2, clntId);
+                                    updatePs.setString(3, symbol);
+                                    updatePs.executeUpdate();
+
                                     mismatches.add("Client=" + clntId +
                                             ", Symbol=" + symbol +
                                             ", total_quantity=" + totalQty +
-                                            ", qty_received_t1=" + qtyReceived);
+                                            ", qty_received_t1=" + qtyReceived +
+                                            ", short_quantity set to=" + diff);
                                 }
                             }
                         }
@@ -277,7 +291,7 @@ public class FtpCsvToPostgresService {
                     return "No mismatches found between SHRT and short_delivery";
                 } else {
                     mismatches.forEach(System.out::println);
-                    return "Found " + mismatches.size() + " mismatches. Check logs for details.";
+                    return "Updated short_quantity for " + mismatches.size() + " rows.";
                 }
             }
 
@@ -293,6 +307,61 @@ public class FtpCsvToPostgresService {
             } catch (Exception ignored) {}
         }
     }
+
+    /**
+     * Finds clients with shortages and retrieves their contact info from cust_mst.
+     */
+    public List<Map<String, Object>> findClientsWithShortageContacts() {
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        String shortageSql = "SELECT clnt_id, security_symbol, short_quantity " +
+                "FROM focus.short_delivery " +
+                "WHERE short_quantity IS NOT NULL AND short_quantity > 0";
+
+        String custSql = "SELECT email_no, mobile_no " +
+                "FROM focus.cust_mst " +
+                "WHERE party_cd = ?";
+
+        try (Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass);
+             PreparedStatement shortagePs = conn.prepareStatement(shortageSql);
+             PreparedStatement custPs = conn.prepareStatement(custSql)) {
+
+            try (ResultSet rs = shortagePs.executeQuery()) {
+                while (rs.next()) {
+                    String clntId = rs.getString("clnt_id");
+                    String symbol = rs.getString("security_symbol");
+                    int shortQty = rs.getInt("short_quantity");
+
+                    // lookup in cust_mst, prefix "C"
+                    custPs.setString(1, "C" + clntId);
+                    try (ResultSet custRs = custPs.executeQuery()) {
+                        if (custRs.next()) {
+                            String email = custRs.getString("email_no");
+                            String mobile = custRs.getString("mobile_no");
+
+                            Map<String, Object> row = new HashMap<>();
+                            row.put("clnt_id", clntId);
+                            row.put("security_symbol", symbol);
+                            row.put("short_quantity", shortQty);
+                            row.put("email_no", email);
+                            row.put("mobile_no", mobile);
+
+                            results.add(row);
+                            System.out.println("Client=" + clntId + ", Symbol=" + symbol +
+                                    ", ShortQty=" + shortQty +
+                                    ", Email=" + email + ", Mobile=" + mobile);
+                        }
+                    }
+                }
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return results;
+    }
+
 
 
 }
