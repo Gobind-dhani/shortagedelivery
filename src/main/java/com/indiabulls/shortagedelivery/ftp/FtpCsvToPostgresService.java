@@ -40,6 +40,7 @@ public class FtpCsvToPostgresService {
         this.pushNotificationService = pushNotificationService;
     }
 
+//Part 1 : Detection of Shortage in delivery of  Stocks notification
 
     public String loadDeliveryDpoFile() {
         FTPClient ftpClient = new FTPClient();
@@ -391,6 +392,7 @@ public class FtpCsvToPostgresService {
 //                 --- Build Push Notification ---
                 PushNotificationRequest pushReq = new PushNotificationRequest();
                 pushReq.setReceivers(Collections.singletonList(clntId));
+                pushReq.setTemplateName("shortage_push_template");
                 Map<String, Object> templateData = new HashMap<>();
                 templateData.put("SYMBOL", symbol);
                 templateData.put("QTY", shortQty);
@@ -402,5 +404,146 @@ public class FtpCsvToPostgresService {
                 System.out.println("Notifications sent for Client=" + clntId + ", Symbol=" + symbol);
                         }
             }
+
+            //Part 2 : Sending Auction Settlement   notification
+
+    public String loadAuctionFileAndNotify() {
+        FTPClient ftpClient = new FTPClient();
+
+        try {
+            // Build yesterday’s folder path
+            LocalDate today = LocalDate.now();
+            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+            String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
+
+            // Connect FTP
+            ftpClient.connect(ftpServer);
+            ftpClient.login(ftpUser, ftpPass);
+            ftpClient.enterLocalPassiveMode();
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+
+            // Locate Auction file
+            String auctionFilePath = null;
+            for (FTPFile file : ftpClient.listFiles(todayBasePath)) {
+                String name = file.getName();
+                if (name.matches("DeliveryDpo_NCL_CM_Auction_.*\\.csv\\.gz")) {
+                    auctionFilePath = todayBasePath + "/" + name;
+                    System.out.println("Found Auction file: " + auctionFilePath);
+                    break;
+                }
+            }
+            if (auctionFilePath == null) {
+                return "Auction file not found in " + todayBasePath;
+            }
+
+            // Download file into memory
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            boolean ok = ftpClient.retrieveFile(auctionFilePath, baos);
+            if (!ok) {
+                return "Failed to download: " + auctionFilePath;
+            }
+
+            // Prepare CSV reader (gzip → utf-8 text)
+            InputStream rawIn = new ByteArrayInputStream(baos.toByteArray());
+            InputStream csvIn = new GZIPInputStream(rawIn);
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(csvIn, StandardCharsets.UTF_8));
+                 Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass)) {
+
+                String headerLine = reader.readLine();
+                if (headerLine == null) {
+                    return "Empty Auction file!";
+                }
+
+                String[] headers = headerLine.split(",", -1);
+                Map<String, Integer> headerMap = new HashMap<>();
+                for (int i = 0; i < headers.length; i++) {
+                    headerMap.put(headers[i].trim(), i);
+                }
+
+                // Ensure required headers exist
+                if (!headerMap.containsKey("ClntId") ||
+                        !headerMap.containsKey("QtyORShrtQty") ||
+                        !headerMap.containsKey("TckrSymb")) {
+                    return "Missing required headers in Auction file!";
+                }
+
+                String custSql = "SELECT email_no, mobile_no FROM focus.cust_mst WHERE party_cd = ?";
+                try (PreparedStatement custPs = conn.prepareStatement(custSql)) {
+
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String[] cols = line.split(",", -1);
+
+                        String clntId = cols[headerMap.get("ClntId")].trim();
+                        String qtyStr = cols[headerMap.get("QtyORShrtQty")].trim();
+                        String symbol = cols[headerMap.get("TckrSymb")].trim();
+
+                        if (clntId.isEmpty() || qtyStr.isEmpty() || symbol.isEmpty()) {
+                            continue;
+                        }
+
+                        int qty = Integer.parseInt(qtyStr);
+
+                        // lookup in cust_mst, prefix "C"
+                        custPs.setString(1, "C" + clntId);
+                        try (ResultSet custRs = custPs.executeQuery()) {
+                            if (custRs.next()) {
+                                String email = custRs.getString("email_no");
+                                String mobile = custRs.getString("mobile_no");
+
+                                // --- Build Email Notification ---
+                                ShortageEmailTemplateData emailData = new ShortageEmailTemplateData();
+                                emailData.setSYMBOL(symbol);
+                                emailData.setQTY(qty);
+
+                                NotificationMessageRequest<ShortageEmailTemplateData> emailReq =
+                                        NotificationMessageRequest.<ShortageEmailTemplateData>builder()
+                                                .receivers(Collections.singletonList(email))
+                                                .templateName("auction_settlement_shares")
+                                                .templateDataJson(emailData)
+                                                .build();
+
+                                emailNotificationService.sendEmailNotification(emailReq);
+
+                                // --- Build Push Notification ---
+                                PushNotificationRequest pushReq = new PushNotificationRequest();
+                                pushReq.setReceivers(Collections.singletonList(clntId));
+                                Map<String, Object> templateData = new HashMap<>();
+                                templateData.put("SYMBOL", symbol);
+                                templateData.put("QTY", qty);
+                                pushReq.setTemplateName("auction_settlement_shares");
+                                pushReq.setTemplateDataJson(templateData);
+
+
+
+                                pushNotificationService.sendPush(pushReq);
+
+                                System.out.println("Auction notification sent for Client=" + clntId +
+                                        ", Symbol=" + symbol + ", Qty=" + qty);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Disconnect FTP
+            ftpClient.logout();
+            ftpClient.disconnect();
+
+            return "Processed Auction file and sent notifications.";
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                if (ftpClient.isConnected()) {
+                    ftpClient.logout();
+                    ftpClient.disconnect();
+                }
+            } catch (Exception ignored) {}
+            return "Error: " + e.getMessage();
         }
+    }
+
+}
 

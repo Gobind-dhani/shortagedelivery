@@ -33,4 +33,8 @@ public class FtpCsvController {
         ftpCsvToPostgresService.notifyClientsWithShortages();
         return "Shortage notifications sent successfully!";
     }
+    @GetMapping("/auction")
+    public String loadAuctionFile() {
+        return ftpCsvToPostgresService.loadAuctionFileAndNotify();
+    }
 }

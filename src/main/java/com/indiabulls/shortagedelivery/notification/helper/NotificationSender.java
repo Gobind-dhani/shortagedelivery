@@ -1,7 +1,6 @@
 package com.indiabulls.shortagedelivery.notification.helper;
 
 import com.indiabulls.shortagedelivery.notification.dto.ShortageEmailTemplateData;
-import com.indiabulls.shortagedelivery.notification.dto.ShortageSMSTemplateData;
 import lombok.RequiredArgsConstructor;
 import lombok.var;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,12 +24,12 @@ public class NotificationSender {
     @Value("${shortage.templates.sms.name}")     private String smsTemplate;
     @Value("${shortage.templates.sms.sender}")   private String smsSender;
 
-    public void sendEmail(List<String> receivers, ShortageEmailTemplateData data) {
+    public void sendEmail(List<String> receivers, ShortageEmailTemplateData data, String tempName) {
         var req = NotificationMessageRequest.<ShortageEmailTemplateData>builder()
                 .receivers(receivers)
                 .sender(emailSender)
                 .subject(emailSubject)
-                .templateName(emailTemplate)
+                .templateName(tempName)
                 .templateDataJson(data)
                 .dataFields(NotificationSpecificFields.builder()
                         .emailDisplayName("Security Shortage")

@@ -57,13 +57,13 @@ public class EmailNotificationService {
                 .receivers(request.getReceivers())
                 .sender(emailSender)              // override with configured sender
                 .subject(emailSubject)            // override with configured subject
-                .templateName(emailTemplate)      // override with configured template
+                .templateName(request.getTemplateName())      // override with configured template
                 .templateDataJson(request.getTemplateDataJson())
                 .dataFields(request.getDataFields())
                 .build();
 
         // Forward to NotificationSender
-        notificationSender.sendEmail(req.getReceivers(), req.getTemplateDataJson());
+        notificationSender.sendEmail(req.getReceivers(), req.getTemplateDataJson(),req.getTemplateName());
 
         System.out.println("Email notification sent to " + req.getTemplateDataJson().getSYMBOL());
     }
