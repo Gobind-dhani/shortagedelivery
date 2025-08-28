@@ -52,7 +52,7 @@ public class FtpCsvToPostgresService {
 
         try {
             // Build today's path
-            LocalDate today = LocalDate.now().minusDays(1);            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
+            LocalDate today = LocalDate.now();            String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
             String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
 
             // Connect FTP
@@ -189,7 +189,7 @@ public class FtpCsvToPostgresService {
 
         try {
             // Build yesterday’s folder path
-            LocalDate today = LocalDate.now().minusDays(1);
+            LocalDate today = LocalDate.now();
             String dateFolder = today.format(DateTimeFormatter.ofPattern("dd-MMMM-yyyy"));
             String todayBasePath = ftpBasePath + "/" + dateFolder + "/stocks";
 
@@ -319,7 +319,7 @@ public class FtpCsvToPostgresService {
 
         String shortageSql = "SELECT clnt_id, security_symbol, short_quantity " +
                 "FROM focus.short_delivery " +
-                "WHERE short_quantity IS NOT NULL AND short_quantity > 500";
+                "WHERE short_quantity IS NOT NULL AND short_quantity > 0";
 
         String custSql = "SELECT email_no, mobile_no " +
                 "FROM focus.cust_mst " +
