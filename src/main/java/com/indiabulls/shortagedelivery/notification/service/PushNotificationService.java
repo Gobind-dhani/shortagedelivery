@@ -29,7 +29,7 @@ public class PushNotificationService {
 
         var req = NotificationMessageRequest.<Object>builder()
                 .receivers(request.getReceivers())
-                .templateName(request.getTemplateName())
+                .templateName("shortage_push_template")
                 .templateDataJson(request.getTemplateDataJson())
                 .dataFields(NotificationSpecificFields.builder()
                         .emailDisplayName(null)

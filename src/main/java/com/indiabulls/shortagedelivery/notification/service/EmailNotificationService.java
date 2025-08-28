@@ -65,61 +65,9 @@ public class EmailNotificationService {
         // Forward to NotificationSender
         notificationSender.sendEmail(req.getReceivers(), req.getTemplateDataJson());
 
-        System.out.println("Email notification sent to " + req.getTemplateDataJson().getCLIENT());
+        System.out.println("Email notification sent to " + req.getTemplateDataJson().getSYMBOL());
     }
 
 
-    // --- Existing DB-driven notification flow stays same ---
-    public void notifyClientsWithShortage() {
-        String sql = "SELECT sd.client_id, sd.isin, sd.short_quantity, sd.average_price, " +
-                "       cm.email_no, cm.mobile_no " +
-                "FROM focus.shortage_delivery sd " +
-                "JOIN focus.cust_mst cm ON cm.client_id = sd.client_id " +
-                "WHERE DATE(sd.created_date) = CURRENT_DATE " +
-                "  AND sd.short_quantity IS NOT NULL " +
-                "  AND sd.short_quantity > 0";
 
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPass);
-             PreparedStatement ps = conn.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-
-            while (rs.next()) {
-                String clientId = rs.getString("client_id");
-                String isin = rs.getString("isin");
-                int shortQty = rs.getInt("short_quantity");
-                Double avgPrice = rs.getObject("average_price") != null ? rs.getDouble("average_price") : null;
-                String email = rs.getString("email_no");
-                String mobile = rs.getString("mobile_no");
-
-                // --- Build Email ---
-                if (email != null && !email.isEmpty()) {
-                    ShortageEmailTemplateData emailData = ShortageEmailTemplateData.builder()
-                            .CLIENT(clientId)
-                            .ISIN(isin)
-                            .QTY(shortQty)
-                            .PRICE(avgPrice)
-                            .build();
-
-                    notificationSender.sendEmail(Collections.singletonList(email), emailData);
-                }
-
-                // --- Build SMS ---
-                if (mobile != null && !mobile.isEmpty()) {
-                    ShortageSMSTemplateData smsData = ShortageSMSTemplateData.builder()
-                            .clientId(clientId)
-                            .isin(isin)
-                            .shortageQty(shortQty)
-                            .build();
-
-                    notificationSender.sendSms(Collections.singletonList(mobile), smsData);
-                }
-
-                System.out.println("Notified client=" + clientId + " isin=" + isin + " qty=" + shortQty);
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException("Failed to send shortage notifications", e);
-        }
-    }
 }

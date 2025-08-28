@@ -8,15 +8,15 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class ShortageEmailTemplateData {
-    @JsonProperty("CLIENT")
-    private String CLIENT;
+//    @JsonProperty("CLIENT")
+//    private String CLIENT;
 
-    @JsonProperty("ISIN")
-    private String ISIN;
+    @JsonProperty("SYMBOL")
+    private String SYMBOL;
 
     @JsonProperty("QTY")
     private Integer QTY;
 
-    @JsonProperty("PRICE")
-    private Double PRICE;
+//    @JsonProperty("PRICE")
+//    private Double PRICE;
 }

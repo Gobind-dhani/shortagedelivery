@@ -39,14 +39,5 @@ public class NotificationSender {
         transport.send(emailRoute, req);
     }
 
-    public void sendSms(List<String> receivers, ShortageSMSTemplateData data) {
-        var req = NotificationMessageRequest.<ShortageSMSTemplateData>builder()
-                .receivers(receivers)
-                .sender(smsSender)
-                .subject(null)
-                .templateName(smsTemplate)
-                .templateDataJson(data)
-                .build();
-        transport.send(smsRoute, req);
-    }
+
 }

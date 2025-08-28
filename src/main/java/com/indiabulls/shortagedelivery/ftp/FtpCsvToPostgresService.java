@@ -1,5 +1,10 @@
 package com.indiabulls.shortagedelivery.ftp;
 
+import com.indiabulls.shortagedelivery.notification.dto.PushNotificationRequest;
+import com.indiabulls.shortagedelivery.notification.dto.ShortageEmailTemplateData;
+import com.indiabulls.shortagedelivery.notification.helper.NotificationMessageRequest;
+import com.indiabulls.shortagedelivery.notification.service.EmailNotificationService;
+import com.indiabulls.shortagedelivery.notification.service.PushNotificationService;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -26,22 +31,14 @@ public class FtpCsvToPostgresService {
     @Value("${spring.datasource.username}") private String jdbcUser;
     @Value("${spring.datasource.password}") private String jdbcPass;
 
-    /**
-     * Fetch the SHRT file from FTP, parse CSV, and dump shortage data into Postgres.
-     */
 
+    private final EmailNotificationService emailNotificationService;
+    private final PushNotificationService pushNotificationService;
 
-    /**
-     * Fetch the DeliveryDPO file from FTP, parse it, and update Postgres with qty_received_t1, isin, clnt_id.
-     */
-
-    /**
-     * Fetch the DeliveryDPO file from FTP, parse it, and update Postgres with qty_received_t1, isin, clnt_id.
-     */
-
-
-
-
+    public FtpCsvToPostgresService(EmailNotificationService emailNotificationService, PushNotificationService pushNotificationService) {
+        this.emailNotificationService = emailNotificationService;
+        this.pushNotificationService = pushNotificationService;
+    }
 
 
     public String loadDeliveryDpoFile() {
@@ -316,7 +313,7 @@ public class FtpCsvToPostgresService {
 
         String shortageSql = "SELECT clnt_id, security_symbol, short_quantity " +
                 "FROM focus.short_delivery " +
-                "WHERE short_quantity IS NOT NULL AND short_quantity > 0";
+                "WHERE short_quantity IS NOT NULL AND short_quantity > 500";
 
         String custSql = "SELECT email_no, mobile_no " +
                 "FROM focus.cust_mst " +
@@ -364,4 +361,46 @@ public class FtpCsvToPostgresService {
 
 
 
-}
+
+
+        // --- existing methods (loadShrtFileAndCompare, findClientsWithShortageContacts, etc.) ---
+
+        public void notifyClientsWithShortages() {
+            List<Map<String, Object>> shortages = findClientsWithShortageContacts();
+
+            for (Map<String, Object> row : shortages) {
+                String clntId = (String) row.get("clnt_id");
+                String symbol = (String) row.get("security_symbol");
+                Integer shortQty = (Integer) row.get("short_quantity");
+                String email = (String) row.get("email_no");
+                String mobile = (String) row.get("mobile_no");
+
+                // --- Build Email Notification ---
+                ShortageEmailTemplateData emailData = new ShortageEmailTemplateData();
+                emailData.setSYMBOL(symbol);
+                emailData.setQTY(shortQty);
+
+                NotificationMessageRequest<ShortageEmailTemplateData> emailReq =
+                        NotificationMessageRequest.<ShortageEmailTemplateData>builder()
+                                .receivers(Collections.singletonList(email))
+                                .templateDataJson(emailData)
+                                .build();
+
+                emailNotificationService.sendEmailNotification(emailReq);
+
+//                 --- Build Push Notification ---
+                PushNotificationRequest pushReq = new PushNotificationRequest();
+                pushReq.setReceivers(Collections.singletonList(clntId));
+                Map<String, Object> templateData = new HashMap<>();
+                templateData.put("SYMBOL", symbol);
+                templateData.put("QTY", shortQty);
+                pushReq.setTemplateDataJson(templateData);
+
+
+                pushNotificationService.sendPush(pushReq);
+
+                System.out.println("Notifications sent for Client=" + clntId + ", Symbol=" + symbol);
+                        }
+            }
+        }
+

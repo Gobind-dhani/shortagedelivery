@@ -27,4 +27,10 @@ public class FtpCsvController {
     public List<Map<String, Object>> getShortageContacts() {
         return ftpCsvToPostgresService.findClientsWithShortageContacts();
     }
+
+    @GetMapping("/notify-shortages")
+    public String notifyShortages() {
+        ftpCsvToPostgresService.notifyClientsWithShortages();
+        return "Shortage notifications sent successfully!";
+    }
 }
