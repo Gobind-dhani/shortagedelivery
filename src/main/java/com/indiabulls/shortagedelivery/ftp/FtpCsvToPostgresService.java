@@ -5,6 +5,8 @@ import com.indiabulls.shortagedelivery.notification.dto.ShortageEmailTemplateDat
 import com.indiabulls.shortagedelivery.notification.helper.NotificationMessageRequest;
 import com.indiabulls.shortagedelivery.notification.service.EmailNotificationService;
 import com.indiabulls.shortagedelivery.notification.service.PushNotificationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -21,6 +23,9 @@ import java.util.zip.GZIPInputStream;
 
 @Service
 public class FtpCsvToPostgresService {
+
+    private static final Logger log = LoggerFactory.getLogger(FtpCsvToPostgresService.class);
+
 
     @Value("${ftp.server}") private String ftpServer;
     @Value("${ftp.user}") private String ftpUser;
@@ -62,7 +67,7 @@ public class FtpCsvToPostgresService {
                 String name = file.getName();
                 if (name.matches("DeliveryDpo_NCL_CM_EquityT1_CM_08756_.*\\.csv\\.gz")) {
                     dpoFilePath = todayBasePath + "/" + name;
-                    System.out.println("Found DeliveryDPO file: " + dpoFilePath);
+                    log.info("Found DeliveryDPO file: " + dpoFilePath);
                     break;
                 }
             }
@@ -175,7 +180,7 @@ public class FtpCsvToPostgresService {
 
         try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
             int updated = ps.executeUpdate();
-            System.out.println("Updated total_quantity for " + updated + " rows in short_delivery");
+            log.info("Updated total_quantity for " + updated + " rows in short_delivery");
         }
     }
 
@@ -200,7 +205,7 @@ public class FtpCsvToPostgresService {
                 String name = file.getName();
                 if (name.matches("NCL_C_.*\\.csv\\.gz")) {
                     shrtFilePath = todayBasePath + "/" + name;
-                    System.out.println("Found SHRT file: " + shrtFilePath);
+                    log.info("Found SHRT file: " + shrtFilePath);
                     break;
                 }
             }
@@ -345,7 +350,7 @@ public class FtpCsvToPostgresService {
                             row.put("mobile_no", mobile);
 
                             results.add(row);
-                            System.out.println("Client=" + clntId + ", Symbol=" + symbol +
+                            log.info("Client=" + clntId + ", Symbol=" + symbol +
                                     ", ShortQty=" + shortQty +
                                     ", Email=" + email + ", Mobile=" + mobile);
                         }
@@ -401,7 +406,7 @@ public class FtpCsvToPostgresService {
 
                 pushNotificationService.sendPush(pushReq);
 
-                System.out.println("Notifications sent for Client=" + clntId + ", Symbol=" + symbol);
+                log.info("Notifications sent for Client=" + clntId + ", Symbol=" + symbol);
                         }
             }
 
@@ -428,7 +433,7 @@ public class FtpCsvToPostgresService {
                 String name = file.getName();
                 if (name.matches("DeliveryDpo_NCL_CM_Auction_.*\\.csv\\.gz")) {
                     auctionFilePath = todayBasePath + "/" + name;
-                    System.out.println("Found Auction file: " + auctionFilePath);
+                    log.info("Found Auction file: " + auctionFilePath);
                     break;
                 }
             }
@@ -519,7 +524,7 @@ public class FtpCsvToPostgresService {
 
                                 pushNotificationService.sendPush(pushReq);
 
-                                System.out.println("Auction notification sent for Client=" + clntId +
+                                log.info("Auction notification sent for Client=" + clntId +
                                         ", Symbol=" + symbol + ", Qty=" + qty);
                             }
                         }
